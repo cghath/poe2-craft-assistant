@@ -1138,10 +1138,21 @@
       if (S.du || NCLS < 2) return null;
       let sig = S.fl + '|' + S.fg + '|';
       for (let i = 0; i < G; i++) sig += S.g[i];
-      sig += '|' + S.j[0] + S.j[1] + (xOn(S, 0) ? 1 : 0) + (xOn(S, 1) ? 1 : 0);
+      sig += '|' + S.j[0] + S.j[1] + (xOn(S, 0) ? 1 : 0) + (xOn(S, 1) ? 1 : 0) + '|' + S.dj + S.cx + S.ct + S.cy + S.cu;
       if (whitMemo.has(sig)) return whitMemo.get(sig);
       // the lowest level a target on the item can have (a fractured one is not removed: it does not count)
       let low = Infinity;
+      // ... and the level of what else must not be mistaken for the lowest: a Desecrated modifier nobody asked for
+      // (the lowest level the Well's list of that side has: 65 on equipment) and a crafted one (its essence's
+      // modifier; not known whose: no edge). The omen takes the lowest of ALL modifiers: with a plain one of 56 to
+      // 74 beside a Desecrated one it took the Desecrated one three times in ten, and the edge said never (a Lament
+      // Amulet's route, the eighth deep run).
+      if (S.dj) { let l = Infinity; for (const e of desList(S.dj - 1, 0, null)) if (e.lvl < l) l = e.lvl; low = Math.min(low, l === Infinity ? 0 : l); }
+      for (const [side, kind] of [[S.cx, S.ct], [S.cy, S.cu]]) {
+        if (!side) continue;
+        const m = kind === 1 && TOOL[side - 1] ? TOOL[side - 1].mod : kind === 2 && FILL[side - 1] ? FILL[side - 1].mod : null;
+        low = Math.min(low, m && kb.mods[m] ? kb.mods[m].lvl : 0);
+      }
       const anon = [];
       for (let i = 0; i < G; i++) {
         const x = S.g[i];
@@ -1397,6 +1408,17 @@
     const revealed = (S1, si, i, status) => { const S2 = addRolled(S1, i, si, status); if (i < 0) { S2.j[si]--; S2.dj = si + 1; } return S2; };
 
     // ---- edges
+    /** The share of target i's twins (by weight) that are target j's twins as well. */
+    const alsoMemo = new Map();
+    function alsoTwin(i, j) {
+      const key = i * 16 + j;
+      if (!alsoMemo.has(key)) {
+        let all = 0, both = 0;
+        for (const e of P.sidePool(ctx, goals[i].side, 0)) if (conv[i].src.has(e.id)) { all += e.w; if (conv[j].src.has(e.id)) both += e.w; }
+        alsoMemo.set(key, all > 0 ? both / all : 0);
+      }
+      return alsoMemo.get(key);
+    }
     /** The share of target k's twins (by weight) that a Flux to element `to` turns: all but those of that element itself. */
     const turnedMemo = new Map();
     function turnedBy(k, to) {
@@ -1935,6 +1957,29 @@
           outs = next;
         }
         push({ op: 'flux', to }, conv[is[0]].price, outs);
+      }
+      // A resistance that is one target's twin is nearly always another resistance target's twin too: the player
+      // picks the Flux. (An item is the node of the first target its twin serves; the route knew only that target's
+      // Flux, and after the other resistance target was lost, the item's node and the model's own next state were
+      // two nodes of different worth: a Lament Amulet with five targets played 15% over its promise.)
+      for (let i = 0; i < G; i++) {
+        if (S.g[i] !== TWIN || !conv[i] || conv[i].via !== 'flux' || S.fg === i) continue;
+        for (let j = 0; j < G; j++) {
+          if (j === i || S.g[j] !== ABSENT || !conv[j] || conv[j].via !== 'flux' || goals[j].si !== goals[i].si || conv[j].to === conv[i].to || fluxes.has(conv[j].to)) continue;
+          const q = alsoTwin(i, j);
+          if (!(q > 0)) continue;
+          const to = conv[j].to;
+          let harm = false;
+          for (let k = 0; k < G; k++) { const m = /^(Fire|Cold|Lightning)Resistance$/.exec(goals[k].fam || ''); if (m && m[1].toLowerCase() !== to && (met(S.g[k]) || near(S.g[k]))) harm = true; }
+          // (another twin on the item would be turned as well: left to the edges above)
+          for (let k = 0; k < G; k++) if (k !== i && S.g[k] === TWIN && conv[k] && conv[k].via === 'flux') harm = true;
+          if (harm) continue;
+          const A = cp(S);
+          A.g[i] = ABSENT; A.g[j] = NATURAL;
+          const outs = [[q, A]];
+          if (q < 1) { const B = cp(S); B.g[i] = ABSENT; junkAt(B, goals[i].si, goalLvl[i]); outs.push([1 - q, B]); }
+          push({ op: 'flux', to }, conv[j].price, outs);
+        }
       }
       if (ALD && !(S.u & R_ALDUR)) {
         const is = [];
@@ -3214,7 +3259,22 @@
     if (net.bound && net.bound.mode === 'never' && !done && !(net.cost(s) < 1e11)) {
       return { net: true, label: 'Route', steps: null, impossible: [`${net.bound.held.length ? net.bound.held.join(', ') + ': no white base can get ' + (net.bound.held.length > 1 ? 'them' : 'it') + ', and ' : ''}every way to the targets can lose a modifier that must stay. Give the price of another item like this one (Plan options, "If given up") and the route can take the risk.`] };
     }
-    const step = net.step(s), B = opts.budget > 0 ? +opts.budget : 0;
+    let step = net.step(s);
+    const B = opts.budget > 0 ? +opts.budget : 0;
+    // The step is one the rules allow on this very item. A node does not know everything about the item in hand
+    // (a wand whose modifiers leave the Well of Souls nothing to offer on the side the Mark came: 152 uses in
+    // 100,000 crafts of the eighth deep run): where the rules refuse the route's step, the next cheapest one they
+    // allow is given, with the reason.
+    let instead = null;
+    if (step && !done && step.a.op !== 'lock' && step.a.op !== 'reveal' && step.a.op !== 'newbase') {
+      try {
+        const st = P.toState(net.ctx, input.item, input.locks), bad = P.validate(net.ctx, st, step.a.pre || step.a);
+        if (bad) {
+          const alt = net.options(s).find((o) => !o.best && o.a.op !== 'lock' && !P.validate(net.ctx, st, o.a.pre || o.a));
+          if (alt) { instead = { names: step.names.length ? step.names : ['Well of Souls'], why: bad }; step = alt; }
+        }
+      } catch (e) { /* an item the simulator cannot read: the route's step stands */ }
+    }
     // Omen of Sanctification as the step to use now: the chance for the values this very item has (the route's own
     // number is for a value anywhere under the wanted one: a node does not know the value)
     let sanctNow = null;
@@ -3236,7 +3296,7 @@
     return {
       net: true, label: 'Route', goals: net.goals.map(plain), params: null, nodes: net.N, lite: net.lite, track: net.track, ms: Date.now() - t0, timing: net.timing,
       meanCost: net.cost(s), sd: net.sd(s), budget: B, p: B > 0 ? net.within(s, B) : null, bases: net.bases(s), charge, bound: net.bound, settled: net.settled,
-      next: done ? { done: true } : step ? Object.assign({}, step.a, { names: well(step.names), hit: net.hit(s) }, step.a.op === 'lock' ? { look: net.lockList(s, 10), plan: null, also: null } : null, sanctNow != null ? { ends: sanctNow } : step.a.bases != null && step.a.op !== 'extraction' ? { ends: 1 - step.a.bases } : null)
+      next: done ? { done: true } : step ? Object.assign({}, step.a, { names: well(step.names), hit: instead ? null : net.hit(s) }, instead ? { instead } : null, step.a.op === 'lock' ? { look: net.lockList(s, 10), plan: null, also: null } : null, sanctNow != null ? { ends: sanctNow } : step.a.bases != null && step.a.op !== 'extraction' ? { ends: 1 - step.a.bases } : null)
         : { fail: 'No currency brings this item to the targets.' },
       // the materials of the whole craft
       steps: done ? [] : net.materials(s).map((m) => ({ names: [m.name], avg: m.uses, ok: m.uses, cost: m.price })),
