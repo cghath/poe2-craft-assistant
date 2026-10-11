@@ -1085,27 +1085,45 @@
       return canon(n);
     }
     /**
-     * Unit u of node S, one of the modifiers its side's class is about, is removed and others of that side are left:
-     * the chance that the lowest of those is of the next class (the removed one was the only one of its class).
-     * lowest: the removed one was the lowest of them (Omen of Whittling); else it was any of them.
+     * Node S without unit u, by chance: [[chance, node]]. When u is one of the modifiers its side's class is about and
+     * others of that side are left, the class of the side may rise: the removed one was the only one of its class
+     * (always the case to ask about when it was the lowest of them, Omen of Whittling: `lowest`; else it was any of
+     * the n, so a share of 1/n). The lowest of those left is then of any higher class, by the chance that all of them
+     * are at least of it.
+     * floor: the level floor of the orb in use. In a loop of Chaos Orbs the modifiers on the side came from that very
+     * orb, and under a floor fewer of them are of the lowest class. (The class rose by one at most and the floor was
+     * not looked at: a six-target amulet's Whittling loop kept its lowest class 74% of the time in the model and
+     * 43% in the play, and the route played at twice its promise; the eighth deep run.)
      */
-    function rise(S, u, lowest) {
-      if (NCLS < 2 || !(u.k === 'j' || u.k === 'jx' || (u.k === 'g' && S.g[u.i] === BLOCKED))) return 0;
+    function without(S, u, lowest, floor) {
+      const S1 = removeUnit(S, u);
+      if (NCLS < 2 || !(u.k === 'j' || u.k === 'jx' || (u.k === 'g' && S.g[u.i] === BLOCKED))) return [[1, S1]];
       const c = clsAt(S, u.si), n = nSide(S, u.si);
-      if (c >= NCLS - 1 || n < 2) return 0;
-      const sA = c === 0 ? 1 : atLeast(u.si, 0, LCUT[c - 1]), sB = atLeast(u.si, 0, LCUT[c]);
+      if (c >= NCLS - 1 || n < 2) return [[1, S1]];
+      // Omen of Whittling takes the lowest every time, so what stays on the side is what survived it: in a loop of
+      // such Chaos Orbs the modifier that stays is the higher one of every pair, and after a few uses it is of the
+      // highest class. A node knows one class a side, not each modifier's: those left count as of the highest class.
+      // (As modifiers drawn anew they were mostly of the lowest class in the model and of the highest in 97% of the
+      // plays; the first use on a fresh item is judged too hard this way, a loop rightly.)
+      if (lowest) { const S2 = cp(S1); setCls(S2, u.si, NCLS - 1); return [[1, S2]]; }
+      const fl = floor || 0;
+      // tail(k): the share of the side's modifiers nobody asked for whose class is k or over
+      const tail = (k) => (k <= 0 ? 1 : k >= NCLS ? 0 : atLeast(u.si, fl, LCUT[k - 1]));
+      const sA = tail(c), sB = tail(c + 1);
       const p = sA > 0 ? Math.max(0, Math.min(1, 1 - sB / sA)) : 0; // one of them is of this class, given that it is of this class or over
-      if (!(p > 0) || p >= 1) return 0;
+      if (!(p > 0) || p >= 1) return [[1, S1]];
       const one = n * p * Math.pow(1 - p, n - 1) / (1 - Math.pow(1 - p, n)); // exactly one of them is of this class
-      return Math.max(0, Math.min(1, lowest ? one : one / n));
-    }
-    /** Node S without unit u, by chance: [[chance, node]] (the class of the side may rise, see rise). */
-    function without(S, u, lowest) {
-      const S1 = removeUnit(S, u), up = rise(S, u, lowest);
+      const up = Math.max(0, Math.min(1, lowest ? one : one / n));
       if (!(up > 0)) return [[1, S1]];
-      const S2 = cp(S1);
-      setCls(S2, u.si, clsAt(S, u.si) + 1);
-      return [[1 - up, S1], [up, S2]];
+      const out = [[1 - up, S1]];
+      let prev = 1;
+      for (let k = c + 1; k < NCLS; k++) {
+        const next = k + 1 < NCLS ? Math.pow(tail(k + 1) / sB, n - 1) : 0; // all of those left are of a class over k
+        const q = prev - next;
+        if (q > 1e-12) { const S2 = cp(S1); setCls(S2, u.si, k); out.push([up * q, S2]); }
+        prev = next;
+      }
+      return out;
     }
     const openMask = (S) => (open(S, 0) > 0 ? 1 : 0) | (open(S, 1) > 0 ? 2 : 0);
     /**
@@ -1776,7 +1794,7 @@
           const us = units(S, (si) => v < 0 || si === v).filter((u) => openMask(removeUnit(S, u)) !== 0), tw = us.reduce((x, u) => x + u.w, 0);
           if (!tw) continue;
           const outs = [];
-          for (const u of us) for (const [q, S1] of without(S, u, false)) outs.push(...rolled(S1, openMask(S1), t.floor, q * u.w / tw));
+          for (const u of us) for (const [q, S1] of without(S, u, false, t.floor)) outs.push(...rolled(S1, openMask(S1), t.floor, q * u.w / tw));
           push(v < 0 ? { op: 'chaos', tier: t.tier } : { op: 'chaos', tier: t.tier, side: SIDES[v] }, t.price + (v < 0 ? 0 : PR.erasure[v]), outs);
         }
         if (PR.whittling != null && WBEST) {
@@ -1789,7 +1807,7 @@
           const ws = whittled(S);
           if (ws) {
             const outs = [];
-            for (const [p, u] of ws) for (const [q, S1] of without(S, u, true)) outs.push(...rolled(S1, openMask(S1), t.floor, p * q));
+            for (const [p, u] of ws) for (const [q, S1] of without(S, u, true, t.floor)) outs.push(...rolled(S1, openMask(S1), t.floor, p * q));
             push({ op: 'chaos', tier: t.tier, whittle: true }, t.price + PR.whittling, outs);
           }
         }
@@ -3198,10 +3216,12 @@
         const k = classes + '|' + track;
         if (seen.has(k)) continue;
         seen.add(k);
-        // (three classes a side make the network about six times as large, two about two and a half times; 65,000
-        // nodes at most: such a network takes a quarter of a minute to solve and as long again to fit to a base limit)
+        // (Three classes a side make the network up to six times as large, two about two and a half times. The limit
+        // is on that estimate, and the network itself may have 100,000 nodes: a minute and a half to solve. It was
+        // 65,000, which left a six-target amulet with two classes: 780,740 where three classes, 69,247 nodes, give
+        // 442,318. With three classes the omen can tell more often which modifier it takes.)
         const size = base * Math.pow(1.4, track) * (classes === 3 ? 6 : 2.6);
-        if (size <= 65000) plans.push({ classes, track, size });
+        if (size <= 120000) plans.push({ classes, track, size });
       }
       // the first that should fit, and when it does not after all, the smallest (a try that does not fit costs as
       // much time as one that does: no more than two)

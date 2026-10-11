@@ -31,9 +31,9 @@ Permafrost Staff are not in the list any more.
   million detours). These requests run in a network that follows no blocker (four targets with Omen of Whittling:
   the network with level classes). On an item with a modifier that keeps a target out, the play, which has one
   network for the whole scenario, takes the node's next cheapest step again and again; it no longer gives such an
-  item up (there is no other). The page solves again from the item after every step and knows that modifier. So
-  this is a finding about the play more than about the route, but it is not shown yet that the page's routes end:
-  open.
+  item up (there is no other). The page solves again from the item after every step and knows that modifier. The
+  play now values such an item by the route solved again from it (see the Tenebrous Amulet below); the next run
+  shows what is left.
 - **Lament Amulet with five targets x1.18** (no detour). Replayed here: 76,018 promised, 87,581 +- 4,245 played, all
   of it in the node transitions. Two causes. A resistance that is one target's twin (what a Flux turns into it) is
   nearly always another resistance target's twin as well, and the route knew only the Flux of the target the twin
@@ -43,10 +43,22 @@ Permafrost Staff are not in the list any more.
   (an edge for every resistance target the twin can become), and the levels of a Desecrated or crafted modifier
   nobody asked for count for the omen. The amulet: **48,406 promised (it was 76,018: the route is a third cheaper),
   45,423 +- 1,410 played.**
-- **Tenebrous Amulet with six targets x2.00** (24,157 detours, 1,112 items given up): as in the seventh run. Replayed
-  here: the model played by its own chances gives its promise (785,258 against 780,740); the play gives a valuable
-  item up at the sixth step that can do nothing on it, 51 times in 60 crafts, where the page would solve again from
-  the item. Open, with the first point.
+- **Tenebrous Amulet with six targets x2.00** (24,157 detours, 1,112 items given up). Replayed here at x2.9, and
+  found to be three things, none of them the blockers it was put down to in the seventh run:
+  - The play gave a valuable item up at the sixth step that could do nothing on it (51 times in 60 crafts), where
+    the page solves again from the item. The play now does what the page does: at such an item the route is solved
+    again from it and the craft ends there with the cost that route promises (`valued`; at most 24 solves a
+    scenario, then the mean of their kind).
+  - The route's network had two classes of levels for Omen of Whittling because three were planned at six times the
+    size and fell over a limit of 65,000 nodes; three classes take 69,247 nodes and 87 seconds. The limit is on
+    that estimate no longer (120,000 planned, 100,000 real).
+  - With that the play was still at twice the promise, all of it in the Whittling loop. The omen takes the lowest
+    modifier every time, so what stays on the side is what survived it: after a few uses the modifier that stays is
+    of the highest class of levels (97% of the plays), and the model drew it anew each time (mostly of the lowest).
+    A node knows one class a side: after the omen those left count as of the highest class. (Also: after a removal
+    without the omen the class can rise by more than one, and the orb's level floor counts.)
+  The amulet now: **717,722 promised, 735,942 +- 53,310 played (x1.03)**. The route itself is the gain: it played at
+  2,270,738 before.
 - **Gloam Ring as an only item x2.33**, values not settled (161 crafts did not end). A request of that kind where the
   rule set's own values do not settle; it is flagged. Not reproduced here (the local prices give another network,
   which agrees). Open.
@@ -59,4 +71,4 @@ Permafrost Staff are not in the list any more.
 
 ## The next run
 
-Started after these fixes: see the run list of the repository.
+Started after these fixes: see the run list of the repository (the ninth run).

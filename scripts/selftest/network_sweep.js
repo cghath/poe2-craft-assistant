@@ -301,11 +301,13 @@ function runOne(sc, runs, withRivals, deep, limitMs) {
   const n = deep ? runs : Math.max(120, Math.min(runs, Math.round(6e5 / Math.max(1, stepsGuess))));
   // a craft of thousands of uses, played 100,000 times, takes hours: such a scenario stops after 40 minutes and says how far it got
   // (near the end of the run the limit is what is left of it, so the process ends on time and its report is written)
-  const got = play(net, input, n, sc.seed, Math.max(5000, Math.round(stepsGuess * 60)), deep ? Math.min(40 * 60000, limitMs > 0 ? limitMs : 40 * 60000) : 0);
+  // (again: an item its node does not know is valued by the route solved again from it, as the page would; see play)
+  const got = play(net, input, n, sc.seed, Math.max(5000, Math.round(stepsGuess * 60)), deep ? Math.min(40 * 60000, limitMs > 0 ? limitMs : 40 * 60000) : 0, null,
+    { again: { max: deep ? 24 : 6, per: 2, ms: 90000 } });
   const ratio = got.mean / want, z = (got.mean - want) / (got.se || 1);
   Object.assign(out, { nodes: net.N, lite: net.lite || 0, runs: got.runs, asked: n, uses: got.steps, network: want, played: got.mean, se: got.se, ratio, z, done: got.done, off: got.off,
     // refused: steps of the route that the simulator's rules do not allow (the network and the rules disagree)
-    refused: got.refused || 0, why: got.why || [], detours: got.detours || 0, detourWhy: got.detourWhy || [], endWhy: got.endWhy || [], gaveUp: got.gaveUp || 0, gaveUpWhy: got.gaveUpWhy || [], track: net.track, classes: net.classes, whittle: net.whittle, settled: net.settled !== false,
+    refused: got.refused || 0, why: got.why || [], detours: got.detours || 0, detourWhy: got.detourWhy || [], endWhy: got.endWhy || [], gaveUp: got.gaveUp || 0, gaveUpWhy: got.gaveUpWhy || [], valued: got.valued || 0, solves: got.solves || 0, track: net.track, classes: net.classes, whittle: net.whittle, settled: net.settled !== false,
     pass: got.done === got.runs && got.off === 0 && !got.refused && net.settled !== false && (Math.abs(ratio - 1) <= 0.15 || Math.abs(z) <= 3) });
   if (withRivals) {
     const b = rivals(sc, input);
@@ -372,6 +374,9 @@ if (require.main === module) {
       ...[...reasons.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, c]) => `- ${c.toLocaleString('en-US')}x ${k}`), '');
   }
   // items given up for a new base because the route's step, and the steps taken in its place, could do nothing on them
+  const val = out.filter((r) => r.valued > 0);
+  if (val.length) lines.push('### Items valued by the route solved again from them', '', `${val.length} scenarios (${val.reduce((x, r) => x + r.valued, 0).toLocaleString('en-US')} crafts, ${val.reduce((x, r) => x + r.solves, 0).toLocaleString('en-US')} routes solved): on an item with a modifier the node does not know, the page would solve again; the craft ends there with what that route promises.`, '',
+    ...val.sort((a, b) => b.valued / b.runs - a.valued / a.runs).slice(0, 8).map((r) => `- ${r.id}: ${r.valued} of ${r.runs} crafts, ${r.solves} solved, track ${r.track}, ${r.whittle}, x${isFinite(r.ratio) ? r.ratio.toFixed(2) : '?'}`), '');
   const given = out.filter((r) => r.gaveUp > 0);
   if (given.length) lines.push('### Items given up', '', `${given.length} scenarios (${given.reduce((x, r) => x + r.gaveUp, 0).toLocaleString('en-US')} items in ${given.reduce((x, r) => x + r.runs, 0).toLocaleString('en-US')} crafts): a modifier the node does not know kept the step's targets out, six times at one node.`,
     ...given.sort((a, b) => b.gaveUp / b.runs - a.gaveUp / a.runs).slice(0, 8).map((r) => `- ${r.id}: ${r.gaveUp} in ${r.runs} crafts, track ${r.track}, ${r.whittle}, x${isFinite(r.ratio) ? r.ratio.toFixed(2) : '?'} (${(r.gaveUpWhy || []).slice(0, 2).join('; ')})`), '');

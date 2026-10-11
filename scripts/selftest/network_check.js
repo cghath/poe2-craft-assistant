@@ -12,7 +12,7 @@
 'use strict';
 const path = require('path');
 const fs = require('fs');
-const { ROOT, E, P, load, weightsFor, testBases, rng } = require('./lib.js');
+const { ROOT, E, P, load, weightsFor, testBases, rng, renderItem } = require('./lib.js');
 const NW = require(path.join(ROOT, 'app', 'network.js'));
 const { scenarios } = require('./scenarios.js');
 const { startItem } = require('./mine.js');
@@ -27,8 +27,16 @@ function inputFor(sc) {
     quality: sc.qualityMode || (sc.quality ? 'use' : 'lock') };
 }
 
-/** Play the network's rule set on the item `runs` times (fewer when `limitMs` runs out). Returns { mean, se, done, steps, off, runs }. */
-function play(net, input, runs, seed, maxSteps, limitMs, audit) {
+/**
+ * Play the network's rule set on the item `runs` times (fewer when `limitMs` runs out). Returns { mean, se, done, steps, off, runs }.
+ * opts.again {max, per, ms}: what the page does with an item its node does not know. The page solves again from
+ * every pasted item, so a modifier that keeps a target out is known to it; the play has one network for the whole
+ * scenario. Where a step can do nothing on the item in hand for that reason, the route is solved again from that
+ * item and the craft ends there with the cost that route promises (at most `max` solves a scenario, `ms` each;
+ * after `per` solves for one node and one set of targets kept out, their mean is used). Such crafts are counted as
+ * valued. Without it (or past the limit) the play takes the node's next step that can do something.
+ */
+function play(net, input, runs, seed, maxSteps, limitMs, audit, opts) {
   // audit: a Map that collects, per node passed, where the simulator's item went: node -> { n, to: Map(next node -> count) }
   let from = -1;
   const until = limitMs > 0 ? Date.now() + limitMs : 0;
@@ -91,6 +99,32 @@ function play(net, input, runs, seed, maxSteps, limitMs, audit) {
   // a step that removes a modifier may remove the one that is in a target's way (a bone does on a full item)
   // a new start: a white base, or with a bound route (net.bound) another item like the pasted one
   const another = (st) => (net.bound ? P.toState(ctx, input.item, input.locks) : P.apply(ctx, st, { op: 'newbase' }, r).state);
+  const AGAIN = opts && opts.again && net.N <= 90000 && !net.goals.some((g) => g.minValue != null) ? opts.again : null;
+  const again = new Map();
+  let solves = 0, valued = 0;
+  const valueAgain = (st, node, hidden) => {
+    if (!AGAIN) return null;
+    const key = node + '|' + hidden.join(',');
+    const got = again.get(key), mean = got && got.n ? got.sum / got.n : null;
+    if (got && got.n >= AGAIN.per) return mean;
+    // (an item the writer below cannot put into text as it is: runes that change the rules, a hidden modifier, quality)
+    if (solves >= AGAIN.max || st.aldur || st.xCrafted || st.xSuffix || (st.tags || []).length || st.catQ || st.mods.some((m) => !m.id || m.unrevealed)) return mean;
+    solves++;
+    let v = null;
+    try {
+      const base = input.item.base;
+      const text = renderItem({ base, cls: ctx.cls, rarity: st.rarity, ilvl: input.item.ilvl, name: 'Item In Hand', implicits: ctx.kb.bases[base].imp || [],
+        mods: st.mods.map((m) => ({ id: m.id, side: m.side, tier: m.tier, frac: m.frac, des: m.des, crafted: m.crafted })) }, rng(seed + 7919 * solves), 'adv').text;
+      const item = E.parseItem(ctx.ix, text).item;
+      const n2 = NW.route(Object.assign({}, input, { item, deadline: Date.now() + (AGAIN.ms || 90000) }));
+      if (n2 && !n2.unsupported && !n2.impossible && !n2.blocked) { const c = n2.done(n2.start) ? 0 : n2.cost(n2.start); if (c >= 0 && c < 1e11) v = c; }
+    } catch (e) { v = null; }
+    if (v == null) return mean;
+    const rec = got || { n: 0, sum: 0 };
+    rec.n++; rec.sum += v;
+    again.set(key, rec);
+    return v;
+  };
   const removes = (a, st) => a.op === 'chaos' || a.op === 'annul' || a.op === 'pessence' || a.op === 'liquid' || a.op === 'newbase' || a.op === 'extraction' || a.op === 'vaal'
     || (a.op === 'bone' && (a.putrefy || a.mark || (!a.hide && open(st, 'prefix') + open(st, 'suffix') === 0)));
   /** Can edge e of the node do nothing on this item: all it could add is among the targets kept out (blocked), and it removes nothing? */
@@ -149,6 +183,9 @@ function play(net, input, runs, seed, maxSteps, limitMs, audit) {
         const hidden = net.hiddenBlocks(st, node);
         if (hidden.length && futileOn(node, step, st, hidden)) {
           const why = 'a modifier the node does not know keeps ' + hidden.map((i) => net.goals[i].label).join(' + ') + ' out';
+          // (the page would solve again from this item: the craft ends here with what that route promises)
+          const v2 = valueAgain(st, node, hidden);
+          if (v2 != null) { cost += v2; valued++; ok = true; break; }
           const c = (stuck.get(node) || 0) + 1;
           stuck.set(node, c);
           if (c > 5 && !(net.bound && net.bound.mode === 'never')) {
@@ -237,7 +274,7 @@ function play(net, input, runs, seed, maxSteps, limitMs, audit) {
   const mean = done ? sum / done : NaN;
   const sd = done > 1 ? Math.sqrt(Math.max(0, sq / done - mean * mean)) : 0;
   const top = (m) => [...m.entries()].sort((x, y) => y[1] - x[1]).slice(0, 3).map(([k, c]) => `${c}x ${k}`);
-  return { mean, se: done ? sd / Math.sqrt(done) : NaN, sd, done, steps: steps / Math.max(1, played), off, refused, runs: played, detours, why: top(whyOf), detourWhy: top(detourWhy), endWhy: top(endWhy), gaveUp, gaveUpWhy: top(gaveUpWhy) };
+  return { mean, se: done ? sd / Math.sqrt(done) : NaN, sd, done, steps: steps / Math.max(1, played), off, refused, runs: played, detours, why: top(whyOf), detourWhy: top(detourWhy), endWhy: top(endWhy), gaveUp, gaveUpWhy: top(gaveUpWhy), valued, solves };
 }
 
 function check(sc, runs, seed, tol) {
