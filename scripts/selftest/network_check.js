@@ -160,7 +160,7 @@ function play(net, input, runs, seed, maxSteps, limitMs, audit, opts) {
       if (audit && net.mapping && node >= 0) { const lv = net.mapping(st); (audit.maps = audit.maps || [0, 0, 0])[lv < 0 ? 2 : lv]++; }
       if (audit && from >= 0) { const rec = audit.get(from) || { n: 0, to: new Map() }; rec.n++; rec.to.set(node, (rec.to.get(node) || 0) + 1); audit.set(from, rec); }
       // (an item the network has no node for: kept with the step that led to it, for the audit)
-      if (node < 0 && audit && from >= 0) (audit.offs = audit.offs || []).push({ from, a: lastA, state: net.stateOf ? JSON.stringify(net.stateOf(st, false)) : '', item: st.rarity + ' ' + st.mods.map((m) => `${m.side[0]}:${m.unrevealed ? '(hidden)' : m.fam}${m.tier ? ' T' + m.tier : ''}${m.frac ? '(F)' : ''}${m.des ? '(D)' : ''}${m.crafted ? '(C)' : ''}`).join(', ') });
+      if (node < 0 && audit && from >= 0) (audit.offs = audit.offs || []).push({ from, a: lastA, state: net.stateOf ? JSON.stringify(net.stateOf(st, true)) + ' (with what is known); ' + JSON.stringify(net.stateOf(st, false)) + ' (without)' : '', item: st.rarity + ' ' + st.mods.map((m) => `${m.side[0]}:${m.unrevealed ? '(hidden)' : m.fam}${m.tier ? ' T' + m.tier : ''}${m.frac ? '(F)' : ''}${m.des ? '(D)' : ''}${m.crafted ? '(C)' : ''}`).join(', ') });
       from = node;
       // (an item with every target on it is finished, also one the network has no node for: what else is on it does not matter any more)
       if (node < 0) { if (net.finished && net.finished(st)) { ok = true; break; } off++; note(endWhy, lastA || { op: 'start' }, 'left the network as ' + look(st)); break; }

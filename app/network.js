@@ -1074,10 +1074,16 @@
       if (S.aw && pred(awSide(S), false)) out.push({ w: 1, k: 'aw', si: awSide(S) });
       return out;
     }
+    // OWNK: what kinds of modifiers nobody asked for the pasted item itself has (set with the start node)
+    let OWNK = null;
     function removeUnit(S, u) {
       const n = cp(S);
-      // (kx: the pasted item's own other modifiers are all still there; which one a removal took is not known)
-      if (u.k !== 'du' && u.k !== 'aw' && !(u.k === 'g' && S.g[u.i] !== BLOCKED)) n.kx = 0;
+      // (kx: the pasted item's own other modifiers are all still there; which one a removal took is not known. A
+      // modifier of a kind the pasted item has none of was not one of them: a Desecrated one that rolled later, taken
+      // off by a tool essence, left the item's own in place, and the item, whose reader sees them all, was no node
+      // of the network: 44% of a bought amulet's crafts left it, the ninth deep run.)
+      const own = !OWNK || (u.k === 'j' || u.k === 'jx' ? OWNK.j[u.si] : u.k === 'g' ? OWNK.b : u.k === 'dj' ? OWNK.dj : u.k === 'cx' || u.k === 'cy' ? OWNK.c : true);
+      if (own && u.k !== 'du' && u.k !== 'aw' && !(u.k === 'g' && S.g[u.i] !== BLOCKED)) n.kx = 0;
       if (u.k === 'g') n.g[u.i] = ABSENT;
       else if (u.k === 'j') n.j[u.si]--;
       else if (u.k === 'jx') { n.j[u.si]--; for (let i = 0; i < G; i++) if (n.g[i] === XBLOCKED && goals[i].si !== u.si && !fracBlocks.has(i) && !xHeld(n, i)) n.g[i] = ABSENT; }
@@ -1111,8 +1117,12 @@
       const tail = (k) => (k <= 0 ? 1 : k >= NCLS ? 0 : atLeast(u.si, fl, LCUT[k - 1]));
       const sA = tail(c), sB = tail(c + 1);
       const p = sA > 0 ? Math.max(0, Math.min(1, 1 - sB / sA)) : 0; // one of them is of this class, given that it is of this class or over
-      if (!(p > 0) || p >= 1) return [[1, S1]];
-      const one = n * p * Math.pow(1 - p, n - 1) / (1 - Math.pow(1 - p, n)); // exactly one of them is of this class
+      if (p >= 1) return [[1, S1]];
+      // exactly one of them is of this class, given that one is. (p 0: under the orb's floor none of this class
+      // rolls, so the one that is there came with the item and is the only one. That case was taken for "no rise":
+      // a Dusk Amulet's loop of Greater Chaos Orbs kept the pasted item's low modifier in the model for ever and
+      // played at 1.6 times its promise, the ninth deep run.)
+      const one = p > 0 ? n * p * Math.pow(1 - p, n - 1) / (1 - Math.pow(1 - p, n)) : 1;
       const up = Math.max(0, Math.min(1, lowest ? one : one / n));
       if (!(up > 0)) return [[1, S1]];
       const out = [[1 - up, S1]];
@@ -1983,7 +1993,11 @@
       for (let i = 0; i < G; i++) {
         if (S.g[i] !== TWIN || !conv[i] || conv[i].via !== 'flux' || S.fg === i) continue;
         for (let j = 0; j < G; j++) {
-          if (j === i || S.g[j] !== ABSENT || !conv[j] || conv[j].via !== 'flux' || goals[j].si !== goals[i].si || conv[j].to === conv[i].to || fluxes.has(conv[j].to)) continue;
+          // (only a later target: a modifier is counted as the twin of the first target it can become, so the twin of
+          // target i is none that an earlier target could have had. An edge to an earlier one promised a T1 Chaos
+          // Resistance from a Void Flux one time in three where the play got it never: a Gloam Amulet at x1.4, the
+          // ninth deep run.)
+          if (j <= i || S.g[j] !== ABSENT || !conv[j] || conv[j].via !== 'flux' || goals[j].si !== goals[i].si || conv[j].to === conv[i].to || fluxes.has(conv[j].to)) continue;
           const q = alsoTwin(i, j);
           if (!(q > 0)) continue;
           const to = conv[j].to;
@@ -2162,6 +2176,7 @@
     // targets that the pasted item's fractured modifier keeps out: for good on this item
     for (const m of st0.mods) if (m.frac && m.id && kb.mods[m.id] && kb.mods[m.id].at) for (let k = 0; k < G; k++) if (goals[k].si !== (m.side === 'prefix' ? 0 : 1) && stops(m.id, k)) fracBlocks.add(k);
     const startS = nodeOf(st0, true);
+    OWNK = { j: [startS.j[0] > 0, startS.j[1] > 0], b: startS.g.some((x) => x === BLOCKED), dj: startS.dj > 0, c: startS.cx > 0 || startS.cy > 0 };
     // entry points a player can buy instead of rolling: a Magic base that has one target, a Rare with one target
     // fractured and nothing else. Solved with the rest so their worth can be told.
     const entries = [];
