@@ -33,7 +33,7 @@ function inputFor(sc) {
  * every pasted item, so a modifier that keeps a target out is known to it; the play has one network for the whole
  * scenario. Where a step can do nothing on the item in hand for that reason, the route is solved again from that
  * item and the craft ends there with the cost that route promises (at most `max` solves a scenario, `ms` each;
- * after `per` solves for one node and one set of targets kept out, their mean is used). Such crafts are counted as
+ * after `per` solves for one set of targets on the item and one set of targets kept out, their mean is used). Such crafts are counted as
  * valued. Without it (or past the limit) the play takes the node's next step that can do something.
  */
 function play(net, input, runs, seed, maxSteps, limitMs, audit, opts) {
@@ -104,7 +104,8 @@ function play(net, input, runs, seed, maxSteps, limitMs, audit, opts) {
   let solves = 0, valued = 0;
   const valueAgain = (st, node, hidden) => {
     if (!AGAIN) return null;
-    const key = node + '|' + hidden.join(',');
+    // (one kind: the targets that are on the item, and the targets kept out; what else is on it differs from item to item)
+    const key = net.states[node].g.map((x) => (x >= 1 && x <= 3 ? 1 : 0)).join('') + '|' + hidden.join(',');
     const got = again.get(key), mean = got && got.n ? got.sum / got.n : null;
     if (got && got.n >= AGAIN.per) return mean;
     // (an item the writer below cannot put into text as it is: runes that change the rules, a hidden modifier, quality)
@@ -116,7 +117,11 @@ function play(net, input, runs, seed, maxSteps, limitMs, audit, opts) {
       const text = renderItem({ base, cls: ctx.cls, rarity: st.rarity, ilvl: input.item.ilvl, name: 'Item In Hand', implicits: ctx.kb.bases[base].imp || [],
         mods: st.mods.map((m) => ({ id: m.id, side: m.side, tier: m.tier, frac: m.frac, des: m.des, crafted: m.crafted })) }, rng(seed + 7919 * solves), 'adv').text;
       const item = E.parseItem(ctx.ix, text).item;
-      const n2 = NW.route(Object.assign({}, input, { item, deadline: Date.now() + (AGAIN.ms || 90000) }));
+      // (The small network: no blocker followed, no Omen of Whittling. The item's own blockers are known to it all
+      // the same, it is there in seconds, and its route is one of the full network's, perhaps not the cheapest: the
+      // craft is not valued too low. The full route from a body armour that is never given up took over the
+      // minute and a half a solve may take, and nothing was valued.)
+      const n2 = NW.build(Object.assign({}, input, { item, lite: 0, track: 0, whittle: 'none', maxStates: 120000, deadline: Date.now() + (AGAIN.ms || 90000) }));
       if (n2 && !n2.unsupported && !n2.impossible && !n2.blocked) { const c = n2.done(n2.start) ? 0 : n2.cost(n2.start); if (c >= 0 && c < 1e11) v = c; }
     } catch (e) { v = null; }
     if (v == null) return mean;

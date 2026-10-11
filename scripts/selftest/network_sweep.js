@@ -303,7 +303,7 @@ function runOne(sc, runs, withRivals, deep, limitMs) {
   // (near the end of the run the limit is what is left of it, so the process ends on time and its report is written)
   // (again: an item its node does not know is valued by the route solved again from it, as the page would; see play)
   const got = play(net, input, n, sc.seed, Math.max(5000, Math.round(stepsGuess * 60)), deep ? Math.min(40 * 60000, limitMs > 0 ? limitMs : 40 * 60000) : 0, null,
-    { again: { max: deep ? 24 : 6, per: 2, ms: 90000 } });
+    { again: { max: deep ? 36 : 12, per: 3, ms: 60000 } });
   const ratio = got.mean / want, z = (got.mean - want) / (got.se || 1);
   Object.assign(out, { nodes: net.N, lite: net.lite || 0, runs: got.runs, asked: n, uses: got.steps, network: want, played: got.mean, se: got.se, ratio, z, done: got.done, off: got.off,
     // refused: steps of the route that the simulator's rules do not allow (the network and the rules disagree)
