@@ -60,6 +60,7 @@ namespace PoE2CraftAssistant
         public bool AdvancedCopy = true;   // Alt+Ctrl+C (modifier tiers) instead of Ctrl+C
         public bool WatchClipboard = true; // take every item copied in game (Ctrl+C, another tool's copy)
         public string GameTitle = "Path of Exile 2";
+        public string Browser = "firefox"; // the assistant's window: "firefox", "edge" or "default" (the default browser)
         public bool StepsOverlay = true;   // the chosen route's steps over the game
         public double StepsX = 50, StepsY = 3; // where: the panel's middle and its top, in percent of the game's width and height
         public int StepsScale = 100, StepsOpacity = 90; // percent; at 100 the panel is 380 pixels wide on a 1080 pixels high game
@@ -79,13 +80,14 @@ namespace PoE2CraftAssistant
                     if (d.ContainsKey("topmost")) c.Topmost = Convert.ToBoolean(d["topmost"]);
                     if (d.ContainsKey("advancedCopy")) c.AdvancedCopy = Convert.ToBoolean(d["advancedCopy"]);
                     if (d.ContainsKey("gameTitle")) c.GameTitle = Convert.ToString(d["gameTitle"]);
+                    if (d.ContainsKey("browser")) c.Browser = Convert.ToString(d["browser"]).Trim().ToLowerInvariant();
                     if (d.ContainsKey("watchClipboard")) c.WatchClipboard = Convert.ToBoolean(d["watchClipboard"]);
                     if (d.ContainsKey("stepsOverlay")) c.StepsOverlay = Convert.ToBoolean(d["stepsOverlay"]);
                     if (d.ContainsKey("stepsX")) c.StepsX = Math.Max(0, Math.Min(100, Convert.ToDouble(d["stepsX"], CultureInfo.InvariantCulture)));
                     if (d.ContainsKey("stepsY")) c.StepsY = Math.Max(0, Math.Min(100, Convert.ToDouble(d["stepsY"], CultureInfo.InvariantCulture)));
                     if (d.ContainsKey("stepsScale")) c.StepsScale = Math.Max(60, Math.Min(250, Convert.ToInt32(d["stepsScale"])));
                     if (d.ContainsKey("stepsOpacity")) c.StepsOpacity = Math.Max(30, Math.Min(100, Convert.ToInt32(d["stepsOpacity"])));
-                    if (!d.ContainsKey("stepsOverlay")) c.Save(); // a file from before the steps panel: its settings are added
+                    if (!d.ContainsKey("stepsOverlay") || !d.ContainsKey("browser")) c.Save(); // a file from before the steps panel: its settings are added
                     // settings of the price check, which the program no longer has: the file is written without them
                     if (d.ContainsKey("priceCheck") || d.ContainsKey("overlay")) c.Save();
                 }
@@ -101,6 +103,7 @@ namespace PoE2CraftAssistant
             {
                 string json = "{\r\n  \"hotkey\": " + Json(Hotkey) + ",\r\n  \"port\": " + Port + ",\r\n  \"topmost\": " + (Topmost ? "true" : "false")
                     + ",\r\n  \"advancedCopy\": " + (AdvancedCopy ? "true" : "false") + ",\r\n  \"gameTitle\": " + Json(GameTitle)
+                    + ",\r\n  \"browser\": " + Json(Browser)
                     + ",\r\n  \"watchClipboard\": " + (WatchClipboard ? "true" : "false")
                     + ",\r\n  \"stepsOverlay\": " + (StepsOverlay ? "true" : "false")
                     + ",\r\n  \"stepsX\": " + StepsX.ToString("0.#", CultureInfo.InvariantCulture) + ",\r\n  \"stepsY\": " + StepsY.ToString("0.#", CultureInfo.InvariantCulture)
@@ -382,17 +385,25 @@ namespace PoE2CraftAssistant
 
         /// <summary>
         /// The assistant's own window: a visible Edge window whose title is exactly the page's (an app-mode window has
-        /// no browser suffix). Other windows that merely mention the name (a chat, a folder, a browser tab) do not count.
+        /// no browser suffix), or a Firefox window showing the page (Firefox adds " \u2014 Mozilla Firefox"). Other
+        /// windows that merely mention the name (a chat, a folder) do not count.
         /// </summary>
         public static IntPtr FindWindowByTitle(string title)
         {
             IntPtr found = IntPtr.Zero;
             EnumWindows(delegate(IntPtr h, IntPtr l)
             {
-                if (!IsWindowVisible(h) || TitleOf(h) != title) return true;
+                if (!IsWindowVisible(h)) return true;
+                string t = TitleOf(h);
+                bool exact = t == title, firefox = t.StartsWith(title + " \u2014 ") || t.StartsWith(title + " - ");
+                if (!exact && !firefox) return true;
                 uint pid;
                 GetWindowThreadProcessId(h, out pid);
-                try { if (!Process.GetProcessById((int)pid).ProcessName.Equals("msedge", StringComparison.OrdinalIgnoreCase)) return true; }
+                try
+                {
+                    string name = Process.GetProcessById((int)pid).ProcessName;
+                    if (!(exact && name.Equals("msedge", StringComparison.OrdinalIgnoreCase)) && !(firefox && name.Equals("firefox", StringComparison.OrdinalIgnoreCase))) return true;
+                }
                 catch (Exception) { return true; }
                 found = h;
                 return false;
@@ -1089,9 +1100,83 @@ namespace PoE2CraftAssistant
             catch (Exception) { /* unreadable, or in use after all: the page's own "do not translate" mark remains */ }
         }
 
-        /// <summary>A page of this program in its own window (Edge's app mode, the assistant's own profile).</summary>
+        /// <summary>
+        /// The assistant's own Firefox profile: a window without tabs or address bar (userChrome.css), no first-run
+        /// pages, no translation offer, and no slowing down while it is behind the game. user.js is written before every
+        /// start (Firefox reads it when it starts); the window's first size only when the profile is new.
+        /// </summary>
+        static void FirefoxProfile(string profile, string size)
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.Combine(profile, "chrome"));
+                string[] prefs = {
+                    "\"toolkit.legacyUserProfileCustomizations.stylesheets\", true",
+                    "\"browser.tabs.inTitlebar\", 0",
+                    "\"browser.shell.checkDefaultBrowser\", false",
+                    "\"browser.startup.homepage_override.mstone\", \"ignore\"",
+                    "\"startup.homepage_welcome_url\", \"\"",
+                    "\"browser.aboutwelcome.enabled\", false",
+                    "\"trailhead.firstrun.didSeeAboutWelcome\", true",
+                    "\"datareporting.policy.dataSubmissionPolicyBypassNotification\", true",
+                    "\"toolkit.telemetry.reportingpolicy.firstRun\", false",
+                    "\"browser.translations.enable\", false",
+                    "\"browser.tabs.warnOnClose\", false",
+                    "\"browser.warnOnQuit\", false",
+                    "\"browser.sessionstore.resume_from_crash\", false",
+                    "\"dom.timeout.enable_budget_timer_throttling\", false",
+                    "\"dom.min_background_timeout_value\", 4",
+                    "\"widget.windows.window_occlusion_tracking.enabled\", false",
+                };
+                StringBuilder js = new StringBuilder("// written by PoE2CraftAssistant.exe on every start\r\n");
+                foreach (string p in prefs) js.Append("user_pref(" + p + ");\r\n");
+                File.WriteAllText(Path.Combine(profile, "user.js"), js.ToString());
+                File.WriteAllText(Path.Combine(profile, "chrome", "userChrome.css"),
+                    "/* the assistant's window: the page only */\r\n"
+                    + "#TabsToolbar, #nav-bar, #PersonalToolbar, #sidebar-main, #sidebar-box, #sidebar-splitter { visibility: collapse !important; }\r\n");
+                string xul = Path.Combine(profile, "xulstore.json");
+                if (!File.Exists(xul))
+                {
+                    string[] wh = size.Split(',');
+                    File.WriteAllText(xul, "{\"chrome://browser/content/browser.xhtml\":{\"main-window\":{\"width\":\"" + wh[0] + "\",\"height\":\"" + wh[1] + "\",\"sizemode\":\"normal\"}}}");
+                }
+            }
+            catch (Exception) { /* a plain Firefox window then */ }
+        }
+
+        static string FindFirefox()
+        {
+            foreach (string p in new string[] { Environment.GetEnvironmentVariable("ProgramFiles"), Environment.GetEnvironmentVariable("ProgramFiles(x86)"), Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) })
+            {
+                if (string.IsNullOrEmpty(p)) continue;
+                string f = Path.Combine(p, @"Mozilla Firefox\firefox.exe");
+                if (File.Exists(f)) return f;
+            }
+            return null;
+        }
+
+        /// <summary>A page of this program in its own window (Firefox, or Edge's app mode; the assistant's own profile).</summary>
         void Launch(string url, string size)
         {
+            if (cfg.Browser == "default")
+            {
+                try { Process.Start(url); }
+                catch (Exception e) { tray.ShowBalloonTip(6000, PAGE_TITLE, "The window could not be opened (" + e.Message + "). Open " + url + " in a browser.", ToolTipIcon.Warning); }
+                return;
+            }
+            string firefox = cfg.Browser == "firefox" ? FindFirefox() : null;
+            if (firefox != null)
+            {
+                try
+                {
+                    string ffProfile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"PoE2CraftAssistant\firefox");
+                    FirefoxProfile(ffProfile, size);
+                    // a profile of its own runs beside the player's usual Firefox (Firefox keys its instances by profile)
+                    Process.Start(firefox, "-profile \"" + ffProfile + "\" -new-window " + url);
+                    return;
+                }
+                catch (Exception) { /* Edge or the default browser below */ }
+            }
             string edge = null;
             foreach (string p in new string[] { Environment.GetEnvironmentVariable("ProgramFiles(x86)"), Environment.GetEnvironmentVariable("ProgramFiles") })
             {
